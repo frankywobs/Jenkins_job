@@ -1,0 +1,79 @@
+pipeline {
+    
+    agent any
+    
+    tools {
+       maven'Maven3'
+    }
+    
+    stages {
+    
+        stage('Checkout') {
+             steps {
+             checkout([$class: 'GitSCM', branches: [[name: '*/main']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'fe9264ee-01fd-408b-8e76-4b7ba4426f27', url: 'https://github.com/frankywobs/frankyrepo']]])
+             } 
+        }
+        stage('Build') {
+             steps {
+                sh 'mvn clean install -f MyWebApp/pom.xml'   
+               }
+        }
+        stage ('Code Quality') {
+             steps {
+             withSonarQubeEnv('SonarQube') {
+                sh 'mvn -f MyWebApp/pom.xml sonar:sonar'
+               }
+           }
+        }
+        stage ('JaCoCo') {
+              steps {
+              jacoco()
+            }
+        }
+         stage ('Nexus Upload') {
+             steps {
+               nexusArtifactUploader artifacts: [[artifactId: 'MyWebApp', classifier: '', file: 'MyWebApp/target/MyWebApp.war', type: 'war']], credentialsId: '4b21b851-8e80-4cf9-a0df-875980fb01e5', groupId: 'com.dept.app', nexusUrl: 'ec2-3-139-147-166.us-east-2.compute.amazonaws.com:8081', nexusVersion: 'nexus3', protocol: 'http', repository: 'maven-snapshots', version: '1.0-SNAPSHOT'    
+            }
+        }
+        stage('Dev Deploy') {
+            steps {
+            echo 'deploying to Dev Env'  
+            deploy adapters: [tomcat9(credentialsId: '1073875d-75f4-4a38-988d-fcab873c4251', path: '', url: 'http://ec2-3-131-78-154.us-east-2.compute.amazonaws.com:8080')], contextPath: null, war: '**/*.war'
+            }
+        }
+         stage ('DEV Approve') {
+            steps {
+            echo 'Taking approval from DEV Manager for QA Deployment'
+            timeout(time: 7, unit: 'DAYS') {
+            input message: 'Do you want to deploy?', submitter: 'admin'
+              }
+           }
+        }
+          stage ('Slack Notification') {
+              steps {
+              echo 'deployed to DEV Env successfully'
+              slackSend channel: 'devops-practice', failOnError: true, message: 'Job built and deployed to Dev', teamDomain: 'cisco-hez1294', tokenCredentialId: 'a355742e-0bae-40e3-b6e9-4c531a811fc4'
+              }
+           }
+          stage('QA Deploy') {
+             steps {
+             echo 'deploying to QA Env'  
+             deploy adapters: [tomcat9(credentialsId: '1073875d-75f4-4a38-988d-fcab873c4251', path: '', url: 'http://ec2-3-131-78-154.us-east-2.compute.amazonaws.com:8080')], contextPath: null, war: '**/*.war'
+            }
+        } 
+        stage ('QA Approve') {
+            steps {
+            echo 'Taking approval from QA Manager for QA Deployment'
+            timeout(time: 7, unit: 'DAYS') {
+            input message: 'Do you want to deploy to production?', submitter: 'admin'
+              }
+            }
+        }
+        stage ('Slack notification') {
+              steps {
+              echo 'deployed to DEV Env successfully'
+              slackSend channel: 'devops-practice', failOnError: true, message: 'Job built and deployed to Dev, approved and deployed to prod...', teamDomain: 'cisco-hez1294', tokenCredentialId: 'a355742e-0bae-40e3-b6e9-4c531a811fc4'
+              }
+           }
+    }
+}
